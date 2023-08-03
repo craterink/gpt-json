@@ -3,6 +3,7 @@ from asyncio import TimeoutError as AsyncTimeoutError
 from asyncio import wait_for
 from dataclasses import replace
 from json import loads as json_loads
+import asyncio
 from json.decoder import JSONDecodeError
 from typing import (
     Any,
@@ -14,7 +15,8 @@ from typing import (
     get_args,
     get_origin,
 )
-
+import litellm
+from litellm import completion
 import anthropic  # type: ignore
 import backoff
 import openai
@@ -322,6 +324,11 @@ class GPTJSON(Generic[SchemaType]):
             logger.error(f"JSON decode error, likely malformed json input: {e}")
             return None, fixed_payload
 
+    async def acompletion(*args, **kwargs):
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, completion, *args, **kwargs)
+        return result
+    
     async def submit_request(
         self,
         messages: list[GPTMessage],
@@ -367,6 +374,16 @@ class GPTJSON(Generic[SchemaType]):
                 stop_sequences=[anthropic.HUMAN_PROMPT],
                 model=self.model,
                 temperature=self.temperature,
+                stream=stream,
+                **optional_parameters,
+                **self.api_arguments,
+            )
+        elif self.model in litellm.model_list:
+            execute_prediction = self.acompletion(
+                model=self.model,
+                messages=[self.message_to_dict(message) for message in messages],
+                temperature=self.temperature,
+                api_key=self.api_key,
                 stream=stream,
                 **optional_parameters,
                 **self.api_arguments,
